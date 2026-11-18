@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -22,6 +23,10 @@ from astrbot.api.star import Context, Star
 
 DEFAULT_API_URL = "https://xcodebest.com/api/group-monitor/snapshot/details"
 DEFAULT_FAIL_MESSAGE = "状态查询失败，请稍后再试。"
+# 处理器优先级：必须高于 AstrBot 内置「群聊上下文感知 / 主动回复」（sys.maxsize - 2）
+# 和「空 @ 等待」（sys.maxsize - 1），这样关键词消息会先由本插件处理并 stop_event，
+# 不会再被主动回复拿去调用大模型。过滤器只匹配完全等于关键词的群消息，不影响其他消息。
+HANDLER_PRIORITY = sys.maxsize
 BEIJING_TZ = timezone(timedelta(hours=8))
 
 # 状态 -> (图标, 名称)。计数行按这个顺序展示。
@@ -153,7 +158,7 @@ class XcodePlugin(Star):
     # 消息处理
     # ------------------------------------------------------------------
 
-    @filter.custom_filter(StatusKeywordFilter)
+    @filter.custom_filter(StatusKeywordFilter, priority=HANDLER_PRIORITY)
     async def on_status_keyword(self, event: AstrMessageEvent):
         """群内发送状态关键词时，回复分组监控快照截图。"""
         entry = self._group_entry(event)
@@ -168,6 +173,11 @@ class XcodePlugin(Star):
             logger.debug(f"[Xcode] 群 {group_key} 处于冷却中，忽略本次触发。")
             event.stop_event()
             return
+
+        # 先回一句提示。每次 yield 都会被 AstrBot 立即发送，再继续往下执行。
+        pending_text = str(self.config.get("pending_text") or "").strip()
+        if pending_text:
+            yield event.plain_result(pending_text)
 
         try:
             data = await self._fetch_snapshot()

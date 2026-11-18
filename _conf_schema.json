@@ -87,6 +87,12 @@
     "default": 5,
     "hint": "关闭白名单后，未在「群配置」里单独设置的群使用这个冷却时间（每个群独立计时）。"
   },
+  "pending_text": {
+    "description": "获取中提示",
+    "type": "string",
+    "default": "正在获取状态~",
+    "hint": "识别到关键词后先立即回复这句话，再去获取状态。留空则不发送。"
+  },
   "header_text": {
     "description": "开头自定义文字",
     "type": "text",
