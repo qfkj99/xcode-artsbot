@@ -1,0 +1,112 @@
+{
+  "api_token": {
+    "description": "API Token",
+    "type": "string",
+    "default": "",
+    "secret": true,
+    "hint": "接口鉴权 Token，只填 Token 本身即可（不用带 Bearer 前缀）。",
+    "obvious_hint": true
+  },
+  "api_user": {
+    "description": "New-Api-User",
+    "type": "string",
+    "default": "2",
+    "hint": "请求头 New-Api-User 的值。"
+  },
+  "api_url": {
+    "description": "快照接口地址",
+    "type": "string",
+    "default": "https://xcodebest.com/api/group-monitor/snapshot/details"
+  },
+  "range": {
+    "description": "统计时间范围",
+    "type": "string",
+    "default": "24h",
+    "hint": "作为 range 参数传给接口，例如 24h。"
+  },
+  "request_timeout": {
+    "description": "请求超时（秒）",
+    "type": "int",
+    "default": 15,
+    "slider": {"min": 3, "max": 60, "step": 1}
+  },
+  "keywords": {
+    "description": "触发关键词",
+    "type": "list",
+    "default": ["状态检查"],
+    "hint": "群消息内容与任意一个关键词完全一致时触发（会忽略首尾空格），无需 @ 机器人。",
+    "obvious_hint": true
+  },
+  "only_whitelisted_groups": {
+    "description": "仅在白名单群中响应",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后只有「群配置」里已启用的群才会响应；关闭后所有群都响应。"
+  },
+  "groups": {
+    "description": "群配置（白名单 + 每群冷却）",
+    "type": "template_list",
+    "hint": "群 ID 获取方法：在目标群里发送触发关键词，然后去 AstrBot 日志里搜索「[Xcode]」，日志中会打印该群的群 ID，复制过来填入即可。",
+    "obvious_hint": true,
+    "templates": {
+      "group": {
+        "name": "群",
+        "display_item": "remark",
+        "items": {
+          "remark": {
+            "description": "备注",
+            "type": "string",
+            "default": "",
+            "hint": "例如群名，仅用于自己识别。"
+          },
+          "group_id": {
+            "description": "群 ID",
+            "type": "string",
+            "default": "",
+            "hint": "QQ 官方机器人下是 group_openid（一串字符），不是 QQ 群号。"
+          },
+          "enabled": {
+            "description": "启用",
+            "type": "bool",
+            "default": true
+          },
+          "cooldown_seconds": {
+            "description": "冷却时间（秒）",
+            "type": "int",
+            "default": 5,
+            "hint": "该群内两次触发的最小间隔，冷却期内的重复触发会被忽略。0 表示不限制。"
+          }
+        }
+      }
+    }
+  },
+  "default_cooldown_seconds": {
+    "description": "默认冷却时间（秒）",
+    "type": "int",
+    "default": 5,
+    "hint": "关闭白名单后，未在「群配置」里单独设置的群使用这个冷却时间（每个群独立计时）。"
+  },
+  "header_text": {
+    "description": "开头自定义文字",
+    "type": "text",
+    "default": "",
+    "hint": "显示在摘要上方，留空则不显示。"
+  },
+  "show_summary": {
+    "description": "显示状态摘要",
+    "type": "bool",
+    "default": true,
+    "hint": "在截图旁附带各状态数量，以及异常、降级、暂无数据的分组名单。"
+  },
+  "footer_text": {
+    "description": "结尾自定义文字",
+    "type": "text",
+    "default": "",
+    "hint": "显示在摘要下方，留空则不显示。"
+  },
+  "fail_message": {
+    "description": "查询失败时的回复",
+    "type": "string",
+    "default": "状态查询失败，请稍后再试。"
+  }
+}
