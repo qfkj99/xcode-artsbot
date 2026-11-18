@@ -46,24 +46,25 @@
   "groups": {
     "description": "群配置（白名单 + 每群冷却）",
     "type": "template_list",
-    "hint": "群 ID 获取方法：在目标群里发送触发关键词，然后去 AstrBot 日志里搜索「[Xcode]」，日志中会打印该群的群 ID，复制过来填入即可。",
+    "hint": "添加一条后，在「群会话」里直接选择群聊即可。列表里找不到目标群时，先在该群发送一次触发关键词（不会回复），再刷新本页面就能选到。",
     "obvious_hint": true,
     "templates": {
       "group": {
         "name": "群",
         "display_item": "remark",
         "items": {
+          "session": {
+            "description": "群会话",
+            "type": "string",
+            "default": "",
+            "_special": "umo",
+            "hint": "点击后从 AstrBot 已记录的会话中选择群聊（蓝色「群聊」标签）。也可以手动粘贴日志里打印的会话 ID。"
+          },
           "remark": {
             "description": "备注",
             "type": "string",
             "default": "",
-            "hint": "例如群名，仅用于自己识别。"
-          },
-          "group_id": {
-            "description": "群 ID",
-            "type": "string",
-            "default": "",
-            "hint": "QQ 官方机器人下是 group_openid（一串字符），不是 QQ 群号。"
+            "hint": "可选，显示在折叠后的列表标题上，方便区分多个群。"
           },
           "enabled": {
             "description": "启用",

@@ -2,7 +2,7 @@ name: astrbot_plugin_xcode
 display_name: Xcode
 desc: Xcode 站点分组监控。群内发送状态关键词（无需 @），机器人返回分组监控快照截图与状态摘要。
 short_desc: 群内发关键词，返回 Xcode 分组监控截图与状态摘要
-version: v1.0.0
+version: v1.1.0
 author: Xcode
 repo: https://github.com/qfkj99/xcode-artsbot
 support_platforms:

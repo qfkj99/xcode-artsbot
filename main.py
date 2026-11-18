@@ -44,11 +44,11 @@ class SnapshotError(Exception):
 
 
 class StatusKeywordFilter(filter.CustomFilter):
-    """只有命中关键词且群允许时才激活处理器，其他群消息完全不受影响。"""
+    """群消息与关键词完全一致时才激活处理器，其他消息完全不受影响。"""
 
     def filter(self, event: AstrMessageEvent, cfg: AstrBotConfig) -> bool:
         plugin = _plugin_instance
-        return plugin is not None and plugin.should_handle(event)
+        return plugin is not None and plugin.is_status_keyword(event)
 
 
 def _as_int(value: Any, default: int) -> int:
@@ -58,11 +58,37 @@ def _as_int(value: Any, default: int) -> int:
         return default
 
 
+def _session_matches(value: Any, event: AstrMessageEvent) -> bool:
+    """判断「群配置」里选择的会话是否就是当前消息所在的群。
+
+    支持三种写法：
+    - 会话选择器保存的 UMO：``<平台ID>:GroupMessage:<群ID>``
+    - 开启会话隔离时的 UMO：``<平台ID>:GroupMessage:<用户ID>_<群ID>``，
+      选中群里任意一个人的会话都视为选中这个群
+    - 直接填写的群 ID（兼容手动填写）
+    """
+    value = str(value or "").strip()
+    group_id = str(event.get_group_id() or "").strip()
+    if not value or not group_id:
+        return False
+    if ":" not in value:
+        return value == group_id
+
+    platform_id, _, rest = value.partition(":")
+    message_type, _, session_id = rest.partition(":")
+    if (
+        platform_id != event.get_platform_id()
+        or message_type != MessageType.GROUP_MESSAGE.value
+    ):
+        return False
+    return session_id == group_id or session_id.endswith(f"_{group_id}")
+
+
 class XcodePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
-        # 群 ID -> 上次触发时间（time.monotonic）
+        # "<平台ID>:<群ID>" -> 上次触发时间（time.monotonic）
         self._last_trigger: dict[str, float] = {}
 
         global _plugin_instance
@@ -72,60 +98,56 @@ class XcodePlugin(Star):
     # 触发判断
     # ------------------------------------------------------------------
 
-    def should_handle(self, event: AstrMessageEvent) -> bool:
-        """每条消息都会调用，所以先做最便宜的判断。"""
+    def is_status_keyword(self, event: AstrMessageEvent) -> bool:
+        """每条消息都会调用，所以只做最便宜的判断：群消息 + 关键词完全一致。"""
         if event.get_message_type() != MessageType.GROUP_MESSAGE:
             return False
-        if event.get_message_str().strip() not in self._keywords():
+        if not str(event.get_group_id() or "").strip():
             return False
-
-        group_id = str(event.get_group_id() or "").strip()
-        if not group_id:
-            return False
-        if self._is_group_allowed(group_id):
-            return True
-
-        logger.info(
-            f"[Xcode] 群 {group_id} 发送了状态关键词，但该群不在白名单中，已忽略。"
-            "如需启用，请把这个群 ID 加到插件配置的「群配置」里。"
-        )
-        return False
+        return event.get_message_str().strip() in self._keywords()
 
     def _keywords(self) -> set[str]:
         keywords = self.config.get("keywords") or []
         return {str(k).strip() for k in keywords if str(k).strip()}
 
-    def _group_entry(self, group_id: str) -> dict | None:
+    def _group_entry(self, event: AstrMessageEvent) -> dict | None:
         for item in self.config.get("groups") or []:
-            if (
-                isinstance(item, dict)
-                and str(item.get("group_id", "")).strip() == group_id
-            ):
+            if isinstance(item, dict) and _session_matches(item.get("session"), event):
                 return item
         return None
 
-    def _is_group_allowed(self, group_id: str) -> bool:
-        entry = self._group_entry(group_id)
-        if entry is not None and not entry.get("enabled", True):
-            return False
-        if not self.config.get("only_whitelisted_groups", True):
-            return True
-        return entry is not None
+    def _is_group_allowed(self, entry: dict | None) -> bool:
+        if entry is not None:
+            return bool(entry.get("enabled", True))
+        return not self.config.get("only_whitelisted_groups", True)
 
-    def _cooldown_seconds(self, group_id: str) -> int:
-        entry = self._group_entry(group_id)
+    def _cooldown_seconds(self, entry: dict | None) -> int:
         if entry is not None:
             return max(0, _as_int(entry.get("cooldown_seconds"), 5))
         return max(0, _as_int(self.config.get("default_cooldown_seconds"), 5))
 
-    def _in_cooldown(self, group_id: str) -> bool:
+    def _in_cooldown(self, group_key: str, cooldown: int) -> bool:
         """检查冷却；不在冷却中则立即记录本次触发，防止并发重复请求。"""
         now = time.monotonic()
-        last = self._last_trigger.get(group_id)
-        if last is not None and now - last < self._cooldown_seconds(group_id):
+        last = self._last_trigger.get(group_key)
+        if last is not None and now - last < cooldown:
             return True
-        self._last_trigger[group_id] = now
+        self._last_trigger[group_key] = now
         return False
+
+    @staticmethod
+    def _log_not_allowed(event: AstrMessageEvent, entry: dict | None) -> None:
+        group = getattr(event.message_obj, "group", None)
+        group_name = getattr(group, "group_name", None)
+        label = f"「{group_name}」" if group_name else f" {event.get_group_id()}"
+        if entry is not None:
+            logger.debug(f"[Xcode] 群{label} 已在群配置中停用，忽略本次触发。")
+            return
+        logger.info(
+            f"[Xcode] 群{label} 发送了状态关键词，但不在白名单中，已忽略。"
+            "在插件配置「群配置」里添加一条，刷新页面后就能在「群会话」中选到这个群；"
+            f"也可以直接粘贴会话 ID：{event.unified_msg_origin}"
+        )
 
     # ------------------------------------------------------------------
     # 消息处理
@@ -134,9 +156,16 @@ class XcodePlugin(Star):
     @filter.custom_filter(StatusKeywordFilter)
     async def on_status_keyword(self, event: AstrMessageEvent):
         """群内发送状态关键词时，回复分组监控快照截图。"""
-        group_id = str(event.get_group_id() or "").strip()
-        if self._in_cooldown(group_id):
-            logger.debug(f"[Xcode] 群 {group_id} 处于冷却中，忽略本次触发。")
+        entry = self._group_entry(event)
+        if not self._is_group_allowed(entry):
+            self._log_not_allowed(event, entry)
+            # 不回复也不拦截。处理器被激活后 AstrBot 会记录这个群会话，
+            # 之后在插件配置的会话选择器里就能直接选到它。
+            return
+
+        group_key = f"{event.get_platform_id()}:{event.get_group_id()}"
+        if self._in_cooldown(group_key, self._cooldown_seconds(entry)):
+            logger.debug(f"[Xcode] 群 {group_key} 处于冷却中，忽略本次触发。")
             event.stop_event()
             return
 
