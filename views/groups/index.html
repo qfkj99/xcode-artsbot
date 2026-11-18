@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>群配置</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="page-header">
+        <div class="page-title">
+          <h1>群配置</h1>
+          <p id="scope-hint" class="muted"></p>
+        </div>
+        <button id="add-btn" class="btn btn-primary" type="button" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v14h-2zM5 11h14v2H5z" /></svg>
+          添加群
+        </button>
+      </header>
+
+      <section id="status" class="status" hidden>
+        <span id="status-text"></span>
+        <button id="retry-btn" class="btn btn-text" type="button" hidden>重试</button>
+      </section>
+
+      <ul id="group-list" class="group-list" aria-label="已添加的群" hidden></ul>
+      <div id="empty" class="empty" hidden>还没有添加任何群，点击右上角「添加群」开始。</div>
+    </main>
+
+    <div id="save-bar" class="save-bar" hidden>
+      <span id="save-bar-text">有未保存的修改</span>
+      <div class="save-actions">
+        <button id="discard-btn" class="btn btn-text" type="button">撤销</button>
+        <button id="save-btn" class="btn btn-primary" type="button">保存</button>
+      </div>
+    </div>
+
+    <div id="dialog" class="dialog-backdrop" hidden>
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+        <div class="dialog-header">
+          <h2 id="dialog-title">添加群</h2>
+          <button id="dialog-close" class="icon-btn" type="button" aria-label="关闭">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4-5.6-5.6L19 6.4 17.6 5 12 10.6z" />
+            </svg>
+          </button>
+        </div>
+        <input id="search" class="input" type="search" placeholder="搜索群名" autocomplete="off" />
+        <ul id="candidate-list" class="candidate-list" aria-label="可添加的群"></ul>
+        <p id="candidate-empty" class="muted small candidate-empty" hidden></p>
+        <details id="manual" class="manual">
+          <summary>手动输入会话 ID</summary>
+          <div class="manual-row">
+            <input
+              id="manual-input"
+              class="input"
+              type="text"
+              placeholder="例如 机器人ID:GroupMessage:群ID"
+              autocomplete="off"
+            />
+            <button id="manual-add" class="btn btn-outline" type="button">添加</button>
+          </div>
+          <p id="manual-error" class="error small" hidden></p>
+        </details>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

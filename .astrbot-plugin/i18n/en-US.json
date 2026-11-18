@@ -1,0 +1,8 @@
+{
+  "views": {
+    "groups": {
+      "title": "Groups",
+      "description": "Choose which groups respond to the status keyword, with per-group cooldown and on/off switch."
+    }
+  }
+}
