@@ -121,5 +121,16 @@
     "description": "查询失败时的回复",
     "type": "string",
     "default": "状态查询失败，请稍后再试。"
+  },
+  "broadcast_interval_seconds": {
+    "description": "群发间隔（秒）",
+    "type": "float",
+    "default": 2.5,
+    "slider": {
+      "min": 1,
+      "max": 10,
+      "step": 0.5
+    },
+    "hint": "「群发通知」每发一条消息后的等待时间。QQ 未认证机器人每分钟最多 30 条主动消息，2.5 秒约每分钟 24 条。"
   }
 }

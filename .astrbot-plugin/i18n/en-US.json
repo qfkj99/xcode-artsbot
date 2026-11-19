@@ -3,6 +3,10 @@
     "groups": {
       "title": "Groups",
       "description": "Choose which groups respond to the status keyword, with per-group cooldown and on/off switch."
+    },
+    "broadcast": {
+      "title": "Broadcast",
+      "description": "Send a notice to the configured groups at once, with optional image and @everyone."
     }
   }
 }

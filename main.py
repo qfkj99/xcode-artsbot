@@ -26,6 +26,8 @@ from astrbot.api.star import Context, Star
 from astrbot.api.web import error_response, json_response, request
 from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
 
+from .broadcast import BroadcastService
+
 # 与 metadata.yaml 的 name 一致。WebUI 调用插件接口时用的是这个名字，与安装目录名无关。
 PLUGIN_NAME = "astrbot_plugin_xcode"
 GROUP_TEMPLATE_KEY = "group"
@@ -127,12 +129,27 @@ class XcodePlugin(Star):
         # 供「群配置」页面按群名选择，持久化在 data/plugin_data/<插件名>/ 下。
         self._seen_groups: dict[str, dict[str, str]] = self._load_seen_groups()
         self._seen_save_task: asyncio.Task | None = None
+        # 「群发通知」页面（views/broadcast）的后端
+        self._broadcast = BroadcastService(
+            context,
+            config,
+            Path(get_astrbot_plugin_data_path()) / PLUGIN_NAME,
+            self._broadcast_targets,
+        )
 
-        # 「群配置」页面（views/groups）调用的接口
+        # 「群配置」「群发通知」页面调用的接口。WebUI 需要登录，只有管理员能调用。
+        bc = self._broadcast
         for route, handler, methods, desc in (
             ("groups", self.api_get_groups, ["GET"], "获取 Xcode 群配置"),
             ("groups", self.api_save_groups, ["POST"], "保存 Xcode 群配置"),
             ("group-candidates", self.api_group_candidates, ["GET"], "可添加的群"),
+            ("broadcast/state", bc.api_state, ["GET"], "群发通知：状态"),
+            ("broadcast/jobs/<job_id>", bc.api_job, ["GET"], "群发通知：任务进度"),
+            ("broadcast/upload", bc.api_upload, ["POST"], "群发通知：上传图片"),
+            ("broadcast/images/<image_id>", bc.api_image, ["GET"], "群发通知：图片"),
+            ("broadcast/send", bc.api_send, ["POST"], "群发通知：发送"),
+            ("broadcast/retry", bc.api_retry, ["POST"], "群发通知：重试失败的群"),
+            ("broadcast/cancel", bc.api_cancel, ["POST"], "群发通知：停止发送"),
         ):
             context.register_web_api(f"/{PLUGIN_NAME}/{route}", handler, methods, desc)
 
@@ -552,6 +569,49 @@ class XcodePlugin(Star):
     async def api_get_groups(self):
         return json_response(await self._groups_payload())
 
+    def _locate_group(self, session: str) -> tuple[str, str]:
+        """群配置里的会话 -> (机器人ID, 群ID)；无法确定时返回空字符串。"""
+        parsed = _parse_group_session(session)
+        if parsed is not None:
+            platform_id, session_id = parsed
+            if f"{platform_id}:{MessageType.GROUP_MESSAGE.value}:{session_id}" in (
+                self._seen_groups
+            ):
+                return platform_id, session_id
+            # 开启会话隔离时会话 ID 是「用户ID_群ID」，与 AstrBot 自身的处理一致
+            return platform_id, session_id.rsplit("_", 1)[-1]
+        # 直接填写的群 ID：看哪个机器人见过这个群
+        for seen_session in self._seen_groups:
+            seen = _parse_group_session(seen_session)
+            if seen is not None and seen[1] == session:
+                return seen
+        return "", ""
+
+    async def _broadcast_targets(self) -> list[dict]:
+        """群发可选的群：只能是「群配置」里的群。"""
+        user_aliases, auto_names = await self._alias_names()
+        targets = []
+        for item in self._config_groups():
+            session = str(item.get("session") or "").strip()
+            if not session:
+                continue
+            platform_id, group_id = self._locate_group(session)
+            targets.append(
+                {
+                    "session": session,
+                    "name": self._resolve_group_name(
+                        session,
+                        user_aliases,
+                        auto_names,
+                        str(item.get("remark") or "").strip(),
+                    ),
+                    "enabled": bool(item.get("enabled", True)),
+                    "platform_id": platform_id,
+                    "group_id": group_id,
+                }
+            )
+        return targets
+
     async def api_group_candidates(self):
         """可添加的群：插件见过的群 + AstrBot 记录过名称的群会话。"""
         user_aliases, auto_names = await self._alias_names()
@@ -648,3 +708,4 @@ class XcodePlugin(Star):
         if self._seen_save_task is not None and not self._seen_save_task.done():
             self._seen_save_task.cancel()
             self._write_seen_groups()
+        await self._broadcast.terminate()

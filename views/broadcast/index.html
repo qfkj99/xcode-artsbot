@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>群发通知</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="page-header">
+        <div class="page-title">
+          <h1>群发通知</h1>
+          <p class="muted">通过机器人给「群配置」里的群批量发送通知。</p>
+        </div>
+      </header>
+
+      <section id="status" class="status" hidden>
+        <span id="status-text"></span>
+        <button id="retry-load" class="btn btn-text" type="button" hidden>重试</button>
+      </section>
+
+      <div id="content" hidden>
+        <!-- 1. 选择群 -->
+        <section class="card">
+          <div class="card-header">
+            <h2>选择群</h2>
+            <div class="card-actions">
+              <span id="selected-count" class="muted small"></span>
+              <button id="select-all" class="btn btn-text btn-sm" type="button">全选</button>
+              <button id="select-none" class="btn btn-text btn-sm" type="button">清空</button>
+            </div>
+          </div>
+          <ul id="target-list" class="target-list" aria-label="可发送的群"></ul>
+          <p id="target-empty" class="muted card-empty" hidden>
+            「群配置」里还没有群。请先到插件详情页的「群配置」页面添加群。
+          </p>
+        </section>
+
+        <!-- 2. 通知内容 -->
+        <section class="card">
+          <div class="card-header"><h2>通知内容</h2></div>
+          <div class="card-body">
+            <textarea id="text" class="textarea" rows="6" placeholder="输入要发送的通知内容"></textarea>
+            <div class="text-meta">
+              <span id="text-count" class="muted small"></span>
+            </div>
+
+            <div class="image-row">
+              <input id="image-input" type="file" accept="image/png,image/jpeg,image/gif" hidden />
+              <button id="image-add" class="btn btn-outline" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M19 5v14H5V5h14m0-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-4.86 8.86-3 3.87L9 13.14 6 17h12l-3.86-5.14z" />
+                </svg>
+                添加图片
+              </button>
+              <div id="image-preview" class="image-preview" hidden>
+                <img id="image-thumb" alt="" />
+                <div class="image-info">
+                  <span id="image-name" class="image-name"></span>
+                  <span id="image-meta" class="muted small"></span>
+                </div>
+                <button id="image-remove" class="btn btn-text btn-sm" type="button">移除</button>
+              </div>
+            </div>
+            <p class="muted small">支持 PNG、JPG、GIF，最大 10 MB，每次一张。</p>
+
+            <label class="check-row">
+              <input id="at-all" type="checkbox" />
+              <span>@全体成员</span>
+            </label>
+            <ul class="hint-list muted small">
+              <li>机器人需要是群管理员；每个群每天只能 @全体成员 1 次，今天已 @过的群会自动改为普通发送。</li>
+              <li>同时带图片时会拆成两条：先发「@全体成员 + 文字」，再发图片。</li>
+            </ul>
+          </div>
+        </section>
+
+        <div class="action-bar">
+          <span id="running-hint" class="muted small" hidden>有群发任务正在进行，结束后才能再次发送。</span>
+          <div class="action-buttons">
+            <button id="test-btn" class="btn btn-outline" type="button">测试发送</button>
+            <button id="send-btn" class="btn btn-primary" type="button">发送</button>
+          </div>
+        </div>
+
+        <!-- 发送进度 / 结果 -->
+        <section id="job-card" class="card" hidden>
+          <div class="card-header">
+            <h2 id="job-title">发送进度</h2>
+            <div class="card-actions">
+              <button id="cancel-btn" class="btn btn-danger btn-sm" type="button" hidden>停止发送</button>
+              <button id="retry-btn" class="btn btn-outline btn-sm" type="button" hidden>重试失败的群</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <p id="job-meta" class="muted small job-meta"></p>
+            <div class="progress" aria-hidden="true"><div id="progress-bar" class="progress-bar"></div></div>
+            <ul id="job-targets" class="job-targets"></ul>
+          </div>
+        </section>
+
+        <!-- 发送记录 -->
+        <section class="card">
+          <div class="card-header"><h2>发送记录</h2></div>
+          <ul id="history-list" class="history-list"></ul>
+          <p id="history-empty" class="muted card-empty" hidden>还没有发送记录。</p>
+        </section>
+      </div>
+    </main>
+
+    <!-- 确认发送 -->
+    <div id="confirm-dialog" class="dialog-backdrop" hidden>
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <div class="dialog-header">
+          <h2 id="confirm-title">确认发送</h2>
+        </div>
+        <ul id="confirm-summary" class="summary-list"></ul>
+        <div class="preview">
+          <div class="preview-label muted small">消息预览</div>
+          <div id="confirm-preview" class="preview-body"></div>
+        </div>
+        <div class="dialog-actions">
+          <button id="confirm-cancel" class="btn btn-text" type="button">取消</button>
+          <button id="confirm-ok" class="btn btn-primary" type="button">确认发送</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 测试发送 -->
+    <div id="test-dialog" class="dialog-backdrop" hidden>
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="test-title">
+        <div class="dialog-header">
+          <h2 id="test-title">测试发送</h2>
+        </div>
+        <p class="muted small">先把这条通知发到一个群，确认机器人有群主动消息权限、内容显示正常。</p>
+        <label class="field-stack">
+          <span class="field-label">发送到</span>
+          <select id="test-target" class="input"></select>
+        </label>
+        <label class="check-row">
+          <input id="test-at-all" type="checkbox" />
+          <span>测试时也 @全体成员</span>
+        </label>
+        <p class="muted small">勾选后会用掉这个群今天唯一的 1 次 @全体成员。</p>
+        <div class="dialog-actions">
+          <button id="test-cancel" class="btn btn-text" type="button">取消</button>
+          <button id="test-ok" class="btn btn-primary" type="button">发送测试</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
