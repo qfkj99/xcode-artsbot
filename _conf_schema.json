@@ -52,6 +52,23 @@
     "hint": "群消息里只要包含其中任意一个词（不用 @），就像 @机器人 一样 100% 触发 AI 回复，使用机器人原本的 AI、人格和对话记录，消息原文完整交给 AI。留空则关闭。所有群都生效。",
     "obvious_hint": true
   },
+  "bare_mention_use_recent": {
+    "description": "单独 @ 时回复刚才的消息",
+    "type": "bool",
+    "default": true,
+    "hint": "群友先发了一段话（或图片），再单独 @机器人 时，把他刚才还没被回复的消息交给 AI 回复。AstrBot 默认遇到单独的 @ 不会回复。"
+  },
+  "bare_mention_window_minutes": {
+    "description": "往前找多久的消息（分钟）",
+    "type": "int",
+    "default": 5,
+    "slider": {
+      "min": 1,
+      "max": 60,
+      "step": 1
+    },
+    "hint": "只取这个人在这段时间内、同一个群里发的消息，最多最近 5 条。"
+  },
   "only_whitelisted_groups": {
     "description": "仅在白名单群中响应",
     "type": "bool",

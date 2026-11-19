@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import time
+from collections import OrderedDict, deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,10 @@ HANDLER_PRIORITY = sys.maxsize
 # AI 唤醒词处理器优先级：高于内置「主动回复」（sys.maxsize - 2）。先把消息标记为已唤醒，
 # 主动回复看到已唤醒的消息会跳过，最终只由 AstrBot 自带的 AI 回复一次。
 AI_WAKE_PRIORITY = sys.maxsize - 1
+# 单独 @机器人 时，最多合并这个人最近几条、多少字的消息交给 AI
+RECENT_MAX_MESSAGES = 5
+RECENT_MAX_CHARS = 2000
+RECENT_MAX_SENDERS = 5000
 BEIJING_TZ = timezone(timedelta(hours=8))
 
 # 状态 -> (图标, 名称)。计数行按这个顺序展示。
@@ -80,6 +85,14 @@ class AiWakeKeywordFilter(filter.CustomFilter):
     def filter(self, event: AstrMessageEvent, cfg: AstrBotConfig) -> bool:
         plugin = _plugin_instance
         return plugin is not None and plugin.is_ai_wake_message(event)
+
+
+class BareMentionFilter(filter.CustomFilter):
+    """群里单独 @机器人（没有文字、图片、引用），且这个人刚发过还没被回复的消息。"""
+
+    def filter(self, event: AstrMessageEvent, cfg: AstrBotConfig) -> bool:
+        plugin = _plugin_instance
+        return plugin is not None and plugin.is_bare_mention_with_recent(event)
 
 
 def _as_int(value: Any, default: int) -> int:
@@ -140,6 +153,9 @@ class XcodePlugin(Star):
         # 供「群配置」页面按群名选择，持久化在 data/plugin_data/<插件名>/ 下。
         self._seen_groups: dict[str, dict[str, str]] = self._load_seen_groups()
         self._seen_save_task: asyncio.Task | None = None
+        # 每个群友最近发的、还没被回复的消息（只在内存里）：
+        # (平台ID, 群ID, 发送者ID) -> deque[(time.monotonic(), 文字, [图片段])]
+        self._recent: OrderedDict[tuple[str, str, str], deque] = OrderedDict()
         # 「群发通知」页面（views/broadcast）的后端
         self._broadcast = BroadcastService(
             context,
@@ -172,20 +188,107 @@ class XcodePlugin(Star):
     # ------------------------------------------------------------------
 
     def is_status_keyword(self, event: AstrMessageEvent) -> bool:
-        """每条消息都会调用，所以只做最便宜的判断：群消息 + 关键词完全一致。
+        """每条群消息都会调用，所以只做便宜的判断：群消息 + 关键词完全一致。
 
-        顺带记下见过的群和群名（只在新群或群名变化时写盘），供群配置页面选择。
+        顺带：记下见过的群和群名（供群配置页面选择），以及每个人最近还没被
+        回复的消息（供「单独 @机器人」时交给 AI）。
         """
         if event.get_message_type() != MessageType.GROUP_MESSAGE:
             return False
         group_id = str(event.get_group_id() or "").strip()
         if not group_id:
             return False
+        is_keyword = event.get_message_str().strip() in self._keywords()
         try:
             self._remember_group(event, group_id)
+            self._track_recent_message(event, group_id, is_keyword)
         except Exception as e:  # 记录失败不能影响正常触发
             logger.debug(f"[Xcode] 记录群信息失败：{e}")
-        return event.get_message_str().strip() in self._keywords()
+        return is_keyword
+
+    # ------------------------------------------------------------------
+    # 单独 @机器人：把这个人刚才发的消息交给 AI
+    # ------------------------------------------------------------------
+
+    def _bare_mention_enabled(self) -> bool:
+        return bool(self.config.get("bare_mention_use_recent", True))
+
+    @staticmethod
+    def _sender_key(
+        event: AstrMessageEvent, group_id: str
+    ) -> tuple[str, str, str] | None:
+        sender_id = str(event.get_sender_id() or "")
+        if not sender_id or not group_id:
+            return None
+        return str(event.get_platform_id() or ""), group_id, sender_id
+
+    @staticmethod
+    def _is_bare_mention(event: AstrMessageEvent) -> bool:
+        """只 @ 了机器人：没有文字、图片、文件、语音、视频，也没有引用。"""
+        if event.get_message_str().strip():
+            return False
+        self_id = str(event.get_self_id() or "")
+        at_self = False
+        for comp in event.message_obj.message:
+            if isinstance(comp, Comp.At):
+                at_self = at_self or str(comp.qq) == self_id
+            elif isinstance(comp, Comp.Plain):
+                if comp.text.strip():
+                    return False
+            else:
+                return False  # 带了图片/引用等内容，AstrBot 本来就会正常回复
+        return at_self
+
+    def _track_recent_message(
+        self, event: AstrMessageEvent, group_id: str, is_status_keyword: bool
+    ) -> None:
+        if not self._bare_mention_enabled():
+            return
+        key = self._sender_key(event, group_id)
+        if key is None or self._is_bare_mention(event):
+            return  # 单独 @ 由 on_bare_mention 取用并清空
+        if (
+            event.is_at_or_wake_command
+            or is_status_keyword
+            or self.is_ai_wake_message(event)
+        ):
+            # 这条消息会被回复，之前攒下的消息也就算处理过了
+            self._recent.pop(key, None)
+            return
+        text = event.get_message_str().strip()
+        images = [c for c in event.message_obj.message if isinstance(c, Comp.Image)]
+        if not text and not images:
+            return
+        bucket = self._recent.get(key)
+        if bucket is None:
+            bucket = self._recent[key] = deque(maxlen=RECENT_MAX_MESSAGES)
+        bucket.append((time.monotonic(), text, images))
+        self._recent.move_to_end(key)
+        while len(self._recent) > RECENT_MAX_SENDERS:
+            self._recent.popitem(last=False)
+
+    def _fresh_recent(self, key: tuple[str, str, str]) -> list:
+        bucket = self._recent.get(key)
+        if not bucket:
+            return []
+        minutes = min(
+            60, max(1, _as_int(self.config.get("bare_mention_window_minutes"), 5))
+        )
+        cutoff = time.monotonic() - minutes * 60
+        fresh = [item for item in bucket if item[0] >= cutoff]
+        if not fresh:
+            self._recent.pop(key, None)
+        return fresh
+
+    def is_bare_mention_with_recent(self, event: AstrMessageEvent) -> bool:
+        if not self._bare_mention_enabled():
+            return False
+        if event.get_message_type() != MessageType.GROUP_MESSAGE:
+            return False
+        if not event.is_at_or_wake_command or not self._is_bare_mention(event):
+            return False
+        key = self._sender_key(event, str(event.get_group_id() or "").strip())
+        return key is not None and bool(self._fresh_recent(key))
 
     def _keywords(self) -> set[str]:
         keywords = self.config.get("keywords") or []
@@ -304,6 +407,41 @@ class XcodePlugin(Star):
         event.is_at_or_wake_command = True
         logger.debug(
             f"[Xcode] 群 {event.get_group_id()} 的消息提到了 AI 唤醒词，触发 AI 回复。"
+        )
+
+    @filter.custom_filter(BareMentionFilter, priority=HANDLER_PRIORITY)
+    async def on_bare_mention(self, event: AstrMessageEvent):
+        """群友先发了消息、再单独 @机器人 时，把他刚才的消息补进这条 @ 交给 AI。
+
+        AstrBot 遇到没有文字、图片、引用的消息会直接跳过 AI 回复。这里把这个人
+        几分钟内还没被回复的文字和图片填进当前消息，之后照常由 AstrBot 自带的 AI
+        回复（同样的人格、上下文、工具）。不回复、不拦截。
+        """
+        group_id = str(event.get_group_id() or "").strip()
+        key = self._sender_key(event, group_id)
+        recent = self._fresh_recent(key) if key else []
+        if key:
+            self._recent.pop(key, None)
+        if not recent:
+            return
+
+        text = "\n".join(t for _, t, _ in recent if t)
+        if len(text) > RECENT_MAX_CHARS:
+            text = text[-RECENT_MAX_CHARS:]
+        images = [img for _, _, imgs in recent for img in imgs]
+
+        chain = event.message_obj.message
+        plain = next((c for c in chain if isinstance(c, Comp.Plain)), None)
+        if plain is not None:
+            plain.text = text
+        elif text:
+            chain.append(Comp.Plain(text))
+        chain.extend(images)
+        event.message_str = text
+        event.message_obj.message_str = text
+        logger.info(
+            f"[Xcode] 群 {group_id} 有人单独 @ 了机器人，"
+            f"把他最近 {len(recent)} 条消息（{len(images)} 张图片）交给 AI 回复。"
         )
 
     # ------------------------------------------------------------------
