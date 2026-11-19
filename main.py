@@ -42,6 +42,9 @@ DEFAULT_FAIL_MESSAGE = "状态查询失败，请稍后再试。"
 # 和「空 @ 等待」（sys.maxsize - 1），这样关键词消息会先由本插件处理并 stop_event，
 # 不会再被主动回复拿去调用大模型。过滤器只匹配完全等于关键词的群消息，不影响其他消息。
 HANDLER_PRIORITY = sys.maxsize
+# AI 唤醒词处理器优先级：高于内置「主动回复」（sys.maxsize - 2）。先把消息标记为已唤醒，
+# 主动回复看到已唤醒的消息会跳过，最终只由 AstrBot 自带的 AI 回复一次。
+AI_WAKE_PRIORITY = sys.maxsize - 1
 BEIJING_TZ = timezone(timedelta(hours=8))
 
 # 状态 -> (图标, 名称)。计数行按这个顺序展示。
@@ -69,6 +72,14 @@ class StatusKeywordFilter(filter.CustomFilter):
     def filter(self, event: AstrMessageEvent, cfg: AstrBotConfig) -> bool:
         plugin = _plugin_instance
         return plugin is not None and plugin.is_status_keyword(event)
+
+
+class AiWakeKeywordFilter(filter.CustomFilter):
+    """群消息里包含 AI 唤醒词、且还没被 @ / 唤醒前缀唤醒时才激活。"""
+
+    def filter(self, event: AstrMessageEvent, cfg: AstrBotConfig) -> bool:
+        plugin = _plugin_instance
+        return plugin is not None and plugin.is_ai_wake_message(event)
 
 
 def _as_int(value: Any, default: int) -> int:
@@ -180,6 +191,22 @@ class XcodePlugin(Star):
         keywords = self.config.get("keywords") or []
         return {str(k).strip() for k in keywords if str(k).strip()}
 
+    def is_ai_wake_message(self, event: AstrMessageEvent) -> bool:
+        """群消息里提到了 AI 唤醒词（如机器人名字），且还没有被 @ / 唤醒前缀唤醒。"""
+        if event.get_message_type() != MessageType.GROUP_MESSAGE:
+            return False
+        if event.is_at_or_wake_command:
+            return False  # 已经是 @ 或唤醒前缀，AstrBot 本来就会回复
+        keywords = [
+            str(k).strip().casefold()
+            for k in self.config.get("ai_wake_keywords") or []
+            if str(k).strip()
+        ]
+        if not keywords:
+            return False
+        text = event.get_message_str().casefold()
+        return any(k in text for k in keywords)
+
     def _group_entry(self, event: AstrMessageEvent) -> dict | None:
         for item in self.config.get("groups") or []:
             if isinstance(item, dict) and _session_matches(item.get("session"), event):
@@ -266,6 +293,18 @@ class XcodePlugin(Star):
 
         yield event.chain_result(chain)
         event.stop_event()
+
+    @filter.custom_filter(AiWakeKeywordFilter, priority=AI_WAKE_PRIORITY)
+    async def on_ai_wake_keyword(self, event: AstrMessageEvent):
+        """群消息提到 AI 唤醒词时，按 @机器人 的方式交给 AstrBot 自带的 AI 回复。
+
+        只把事件标记为「已唤醒」，不回复也不拦截：插件处理完后 AstrBot 会像
+        被 @ 时一样调用 AI（同样的人格、上下文、工具），消息原文完整保留。
+        """
+        event.is_at_or_wake_command = True
+        logger.debug(
+            f"[Xcode] 群 {event.get_group_id()} 的消息提到了 AI 唤醒词，触发 AI 回复。"
+        )
 
     # ------------------------------------------------------------------
     # 接口请求

@@ -43,6 +43,15 @@
     "hint": "群消息内容与任意一个关键词完全一致时触发（会忽略首尾空格），无需 @ 机器人。",
     "obvious_hint": true
   },
+  "ai_wake_keywords": {
+    "description": "AI 唤醒词",
+    "type": "list",
+    "default": [
+      "大肥鱼"
+    ],
+    "hint": "群消息里只要包含其中任意一个词（不用 @），就像 @机器人 一样 100% 触发 AI 回复，使用机器人原本的 AI、人格和对话记录，消息原文完整交给 AI。留空则关闭。所有群都生效。",
+    "obvious_hint": true
+  },
   "only_whitelisted_groups": {
     "description": "仅在白名单群中响应",
     "type": "bool",
